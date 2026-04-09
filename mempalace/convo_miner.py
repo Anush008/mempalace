@@ -15,9 +15,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
 from .normalize import normalize
+from .vector_store import get_collection as _get_vector_store_collection
 
 
 # File types that might contain conversations
@@ -211,15 +210,6 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
 def file_already_mined(collection, source_file: str) -> bool:
     try:
         results = collection.get(where={"source_file": source_file}, limit=1)
@@ -288,7 +278,7 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'-' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    collection = _get_vector_store_collection(palace_path, create=True) if not dry_run else None
 
     total_drawers = 0
     files_skipped = 0

@@ -29,7 +29,7 @@ from .config import MempalaceConfig
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
+from .vector_store import get_collection as _get_vector_store
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -65,16 +65,9 @@ _collection_cache = None
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, caching the client between calls."""
-    global _client_cache, _collection_cache
+    """Return the configured vector store collection, or None on failure."""
     try:
-        if _client_cache is None:
-            _client_cache = chromadb.PersistentClient(path=_config.palace_path)
-        if create:
-            _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
-        elif _collection_cache is None:
-            _collection_cache = _client_cache.get_collection(_config.collection_name)
-        return _collection_cache
+        return _get_vector_store(_config.palace_path, config=_config, create=create)
     except Exception:
         return None
 
@@ -756,7 +749,7 @@ def handle_request(request):
             }
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
-        # ChromaDB and Python slicing require native int.
+        # Vector store and Python slicing require native int.
         schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
         for key, value in list(tool_args.items()):
             prop_schema = schema_props.get(key, {})
