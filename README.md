@@ -84,6 +84,18 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 ---
 
+## An important follow up note regarding fake MemPalace websites - April 11, 2026
+
+Several Community Members (#267, #326, #506) have pointed out there are fake MemPalace websites popping up, including ones with Malware.
+
+To be super clear, MemPalace *has no website* (at least for now), so anything claiming to be one is false.
+
+Thanks to our Community Members for letting us know about the problem.
+
+Stay safe out there.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -206,33 +218,33 @@ There are also **halls**, which connect rooms within a wing, and **tunnels**, wh
 You say what you're looking for and boom, it already knows which wing to go to. Just *that* in itself would have made a big difference. But this is beautiful, elegant, organic, and most importantly, efficient.
 
 ```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  WING: Person                                              │
-  │                                                            │
-  │    ┌──────────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room B  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────┼──────────────────────────────────────────────────┘
-            │
+  +------------------------------------------------------------+
+  ¦  WING: Person                                              ¦
+  ¦                                                            ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room B  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +---------+--------------------------------------------------+
+            ¦
           tunnel
-            │
-  ┌─────────┼──────────────────────────────────────────────────┐
-  │  WING: Project                                             │
-  │         │                                                  │
-  │    ┌────┴─────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room C  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────────────────────────────────────────────────────────┘
+            ¦
+  +---------+--------------------------------------------------+
+  ¦  WING: Project                                             ¦
+  ¦         ¦                                                  ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room C  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +------------------------------------------------------------+
 ```
 
 **Wings** — a person or project. As many as you need.

@@ -418,16 +418,16 @@ def process_file(
     # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, None
+        return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0, None
+        return 0, "general"
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
+        return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
@@ -435,6 +435,16 @@ def process_file(
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
+
+    # Purge stale drawers for this file before re-inserting the fresh chunks.
+    # Converts modified-file re-mines from upsert-over-existing-IDs (which hits
+    # hnswlib's thread-unsafe updatePoint path and can segfault on macOS ARM
+    # with chromadb 0.6.3) into a clean delete+insert, bypassing the update
+    # path entirely.
+    try:
+        collection.delete(where={"source_file": source_file})
+    except Exception:
+        pass
 
     drawers_added = 0
     for chunk in chunks:
@@ -622,7 +632,8 @@ def status(palace_path: str):
         return
 
     # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
+    total = col.count()
+    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
