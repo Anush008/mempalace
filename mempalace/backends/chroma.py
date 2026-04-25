@@ -120,8 +120,7 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined stale HNSW segment %s "
-                "(sqlite %.0fs newer than HNSW); renamed to %s",
+                "Quarantined stale HNSW segment %s (sqlite %.0fs newer than HNSW); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
                 target,
@@ -369,6 +368,18 @@ class ChromaCollection(BaseCollection):
     def count(self):
         return self._collection.count()
 
+    @property
+    def metadata(self) -> dict:
+        """Pass-through to the underlying ChromaDB collection's metadata.
+
+        Used by the searcher to detect legacy palaces that were created
+        without ``hnsw:space=cosine`` and therefore silently use L2
+        distance, which breaks cosine-based similarity interpretation.
+        Returns ``{}`` when metadata is absent so callers can do a plain
+        ``.get("hnsw:space")`` without None-checks.
+        """
+        return self._collection.metadata or {}
+
 
 # ---------------------------------------------------------------------------
 # Backend
@@ -405,6 +416,23 @@ class ChromaBackend(BaseBackend):
         # palace_path -> (inode, mtime) of chroma.sqlite3 at cache time.
         self._freshness: dict[str, tuple[int, float]] = {}
         self._closed = False
+
+    @staticmethod
+    def _resolve_embedding_function():
+        """Return the EF for the user's ``embedding_device`` setting.
+
+        Both ``get_collection`` and ``get_or_create_collection`` must receive
+        the EF explicitly — ChromaDB 1.x does not persist it with the
+        collection, so a reader that omits the argument silently gets the
+        library default and its queries won't match the writer's vectors.
+        """
+        try:
+            from ..embedding import get_embedding_function
+
+            return get_embedding_function()
+        except Exception:
+            logger.exception("Failed to build embedding function; using chromadb default")
+            return None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -533,12 +561,15 @@ class ChromaBackend(BaseBackend):
         if options and isinstance(options, dict):
             hnsw_space = options.get("hnsw_space", hnsw_space)
 
+        ef = self._resolve_embedding_function()
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+
         if create:
             collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": hnsw_space}
+                collection_name, metadata={"hnsw:space": hnsw_space}, **ef_kwargs
             )
         else:
-            collection = client.get_collection(collection_name)
+            collection = client.get_collection(collection_name, **ef_kwargs)
         return ChromaCollection(collection)
 
     def close_palace(self, palace) -> None:
@@ -579,8 +610,10 @@ class ChromaBackend(BaseBackend):
         self, palace_path: str, collection_name: str, hnsw_space: str = "cosine"
     ) -> ChromaCollection:
         """Create (not get-or-create) ``collection_name`` with the given HNSW space."""
+        ef = self._resolve_embedding_function()
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name, metadata={"hnsw:space": hnsw_space}, **ef_kwargs
         )
         return ChromaCollection(collection)
 
@@ -615,6 +648,8 @@ def _normalize_get_collection_args(args, kwargs):
         create = kwargs.pop("create", False)
         if rest:
             create = rest.pop(0)
+        if rest:
+            raise TypeError(f"unexpected positional args: {rest!r}")
         if kwargs:
             raise TypeError(f"unexpected kwargs: {sorted(kwargs)}")
         return (
