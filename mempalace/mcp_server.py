@@ -57,7 +57,7 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from .vector_store import get_collection as _get_vector_store  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection, _pin_hnsw_threads  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -101,6 +101,12 @@ if _args.palace:
     _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 else:
     _kg = KnowledgeGraph()
+
+
+_client_cache = None
+_collection_cache = None
+_palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
+_palace_db_mtime = 0.0  # mtime of chroma.sqlite3 at cache time
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -153,10 +159,86 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-def _get_collection(create=False):
-    """Return the configured vector store collection, or None on failure."""
+def _get_client():
+    """Return a ChromaDB PersistentClient, reconnecting if the database changed on disk.
+
+    Detects palace rebuilds (repair/nuke/purge) by checking the inode of
+    chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
+    Also detects external writes (scripts, CLI) via mtime changes — the
+    inode check alone misses in-place modifications that invalidate the
+    in-memory HNSW index.
+
+    Note: FAT/exFAT may return 0 for st_ino — the ``current_inode != 0``
+    guard skips reconnect detection on those filesystems (safe fallback).
+    """
+    global \
+        _client_cache, \
+        _collection_cache, \
+        _palace_db_inode, \
+        _palace_db_mtime, \
+        _metadata_cache, \
+        _metadata_cache_time
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     try:
-        return _get_vector_store(_config.palace_path, config=_config, create=create)
+        st = os.stat(db_path)
+        current_inode = st.st_ino
+        current_mtime = st.st_mtime
+    except OSError:
+        current_inode = 0
+        current_mtime = 0.0
+
+    # If the DB file disappeared (e.g. during rebuild) but we have a cached
+    # collection, invalidate so we don't serve stale data.  Without this,
+    # both stored and current values are 0 on the first call after deletion,
+    # making inode_changed and mtime_changed both False.
+    if not os.path.isfile(db_path) and _collection_cache is not None:
+        _client_cache = None
+        _collection_cache = None
+        _palace_db_inode = 0
+        _palace_db_mtime = 0.0
+        # Fall through to normal reconnect which will handle missing DB
+
+    inode_changed = current_inode != 0 and current_inode != _palace_db_inode
+    mtime_changed = current_mtime != 0.0 and abs(current_mtime - _palace_db_mtime) > 0.01
+
+    if _client_cache is None or inode_changed or mtime_changed:
+        _client_cache = ChromaBackend.make_client(_config.palace_path)
+        _collection_cache = None
+        _metadata_cache = None
+        _metadata_cache_time = 0
+        _palace_db_inode = current_inode
+        _palace_db_mtime = current_mtime
+    return _client_cache
+
+
+def _get_collection(create=False):
+    """Return the ChromaDB collection, caching the client between calls."""
+    global _collection_cache, _metadata_cache, _metadata_cache_time
+    try:
+        client = _get_client()
+        if create:
+            # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
+            # HNSW insert path, which has a race in repairConnectionsForUpdate /
+            # addPoint (see issues #974, #965). Set via metadata on fresh
+            # collections and re-applied via _pin_hnsw_threads() for legacy
+            # palaces whose collections were created before this fix (the
+            # runtime config does not persist cross-process in chromadb 1.5.x,
+            # so the retrofit runs every time _get_collection opens a cache).
+            raw = client.get_or_create_collection(
+                _config.collection_name,
+                metadata={"hnsw:space": "cosine", "hnsw:num_threads": 1},
+            )
+            _pin_hnsw_threads(raw)
+            _collection_cache = ChromaCollection(raw)
+            _metadata_cache = None
+            _metadata_cache_time = 0
+        elif _collection_cache is None:
+            raw = client.get_collection(_config.collection_name)
+            _pin_hnsw_threads(raw)
+            _collection_cache = ChromaCollection(raw)
+            _metadata_cache = None
+            _metadata_cache_time = 0
+        return _collection_cache
     except Exception:
         return None
 
@@ -1586,8 +1668,7 @@ def handle_request(request):
             tool_args = {k: v for k, v in tool_args.items() if k in schema_props}
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
-        # Vector store and Python slicing require native int.
-        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        # ChromaDB and Python slicing require native int.
         for key, value in list(tool_args.items()):
             prop_schema = schema_props.get(key, {})
             declared_type = prop_schema.get("type")
